@@ -21,6 +21,10 @@ parameter [1:0] PARITY_MODE_ODD  = 2'b10;
 
 reg [1:0] parity_select;
 
+// Stop bit selection, driven into both devices.
+// 2'b00 = 1 stop bit, 2'b01 = 1.5 stop bits, 2'b10 = 2 stop bits
+reg [1:0] stop_bits;
+
 // TX data used for transmission tests
 reg [7:0] tx_data1;
 reg [7:0] tx_data2;
@@ -85,6 +89,7 @@ device d1 (
     .baud_select(baud_select),
     .data_length(data_length),
     .parity_select(parity_select),
+    .stop_bits(stop_bits),
     .tx_start(tx_start1),
     .tx_data(tx_data1),
     .cts(cts1),
@@ -109,6 +114,7 @@ device d2 (
     .baud_select(baud_select),
     .data_length(data_length),
     .parity_select(parity_select),
+    .stop_bits(stop_bits),
     .tx_start(tx_start2),
     .tx_data(tx_data2),
     .cts(cts2),
@@ -147,6 +153,7 @@ begin
     framing_inject2 = 0;
     oversampling_noise = 0;
     flow_control_en = 0;
+    stop_bits = 2'b00;         // Default: 1 stop bit (existing behavior)
 
     repeat(3) @(posedge clk);
     reset = 0;
@@ -235,6 +242,7 @@ initial begin
     framing_inject2 = 0;
     oversampling_noise = 0;
     flow_control_en = 0;
+    stop_bits = 2'b00;         // Default: 1 stop bit (existing behavior)
 
     errors = 0;
     tx_data1 = TX_DATA1;
@@ -953,7 +961,9 @@ initial begin
     end
 
     // CTS is clear again, so D1 can continue transmitting.
-    wait(d2.rx_count == 16);
+    // One byte was read out above, so the FIFO can only hold 15 bytes
+    // when the 16th (last queued) byte arrives.
+    wait(d2.rx_count == 15);
 
     $display("CTS/RTS flow control PASS");
 
@@ -1104,6 +1114,73 @@ initial begin
     else begin
         $display("RX did not produce valid data.");
     end
+
+    // TEST 18: Configurable stop bits
+    // TX must hold the stop position for 1, 1.5 or 2 bit times as selected;
+    // RX samples only the first stop bit, so all frames must be received
+    // correctly. Default of all other tests is 1 stop bit.
+    $display("");
+    $display("TEST 18: CONFIGURABLE STOP BITS");
+
+    // 2 stop bits, Device 1 -> Device 2, 8-bit data
+    reset_uart;
+
+    data_length = 2'b11;
+    baud_select = 2'b11;
+    parity_select = 2'b00;
+    stop_bits = 2'b10;         // 2 stop bits
+    tx_data1 = TX_DATA1;
+
+    @(negedge clk);
+    tx_start1 = 1;
+    @(negedge clk);
+    tx_start1 = 0;
+
+    wait(rx_valid2);
+    $display("2 stop bits: TX = %h, RX = %h", TX_DATA1, rx_data2);
+
+    if (rx_data2 !== TX_DATA1) begin
+        $display("ERROR: 2 stop bits test failed");
+        errors = errors + 1;
+    end
+    else
+        $display("2 STOP BITS PASS");
+
+    @(negedge clk);
+    rx_read2 = 1;
+    @(negedge clk);
+    rx_read2 = 0;
+
+    // 1.5 stop bits (valid with 5-bit data), Device 1 -> Device 2
+    reset_uart;
+
+    data_length = 2'b00;       // 5-bit data frames
+    baud_select = 2'b11;
+    parity_select = 2'b00;
+    stop_bits = 2'b01;         // 1.5 stop bits
+    tx_data1 = 8'h15;
+
+    @(negedge clk);
+    tx_start1 = 1;
+    @(negedge clk);
+    tx_start1 = 0;
+
+    wait(rx_valid2);
+    $display("1.5 stop bits: TX = 15, RX = %h", rx_data2);
+
+    if (rx_data2 !== 8'h15) begin
+        $display("ERROR: 1.5 stop bits test failed");
+        errors = errors + 1;
+    end
+    else
+        $display("1.5 STOP BITS PASS");
+
+    @(negedge clk);
+    rx_read2 = 1;
+    @(negedge clk);
+    rx_read2 = 0;
+
+    stop_bits = 2'b00;         // Restore default
 
     // Summary of all test results
     $display("\n========================================");

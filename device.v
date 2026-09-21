@@ -1,11 +1,10 @@
-// UART device
-// Uses 16x oversampling for all baud settings.
 module device(
     input clk,
     input reset,
     input [1:0] baud_select,
     input [1:0] data_length,
     input [1:0] parity_select,       // 00=none, 01=even, 10=odd
+    input [1:0] stop_bits,           // 00=1 stop bit, 01=1.5, 10=2
     input tx_start,
     input [7:0] tx_data,
     input cts,                        // active-low: 0=may send
@@ -25,6 +24,10 @@ module device(
     parameter PARITY_NONE = 2'b00;
     parameter PARITY_EVEN = 2'b01;
     parameter PARITY_ODD  = 2'b10;
+
+    parameter STOP_BITS_1   = 2'b00; // 1 stop bit
+    parameter STOP_BITS_1_5 = 2'b01; // 1.5 stop bits (5-bit data frames)
+    parameter STOP_BITS_2   = 2'b10; // 2 stop bits
 
     parameter IDLE   = 3'd0;
     parameter START  = 3'd1;
@@ -54,6 +57,20 @@ module device(
             2'b01: num_data_bits = 6;                      // 6-bit data
             2'b10: num_data_bits = 7;                      // 7-bit data
             default: num_data_bits = 8;                    // 8-bit data
+        endcase
+    end
+
+    // Stop-bit length in 16x sample ticks for the transmitter.
+    // Industry convention (16550-style LCR[2]): 1, 1.5 or 2 stop bits.
+    // 1.5 stop bits only applies to 5-bit data frames; for 6-8 bit
+    // frames a 1.5 selection behaves as 2 stop bits.
+    reg [5:0] tx_stop_total;
+
+    always @(*) begin
+        case (stop_bits)
+            STOP_BITS_1_5: tx_stop_total = (num_data_bits == 5) ? 6'd24 : 6'd32;
+            STOP_BITS_2  : tx_stop_total = 6'd32;
+            default      : tx_stop_total = 6'd16;          // 1 stop bit
         endcase
     end
 
@@ -115,6 +132,7 @@ module device(
     reg [7:0] tx_reg;
     reg tx_parity;
     reg [3:0] tx_sample_count;
+    reg [5:0] tx_stop_count;
 
     always @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -126,6 +144,7 @@ module device(
             tx_reg <= 0;                                   // Clear shift register.
             tx_parity <= 0;                                // Clear parity bit.
             tx_sample_count <= 0;                          // Clear sample counter.
+            tx_stop_count <= 0;                            // Clear stop bit counter.
             tx_active <= 0;                                // TX not busy.
             tx_done <= 0;                                  // No done pulse.
             serial_tx <= 1'b1;                             // UART line idle high.
@@ -202,8 +221,10 @@ module device(
                             tx_reg <= tx_reg >> 1;         // Shift to next bit.
 
                             if (tx_bit == num_data_bits - 1) begin
-                                if (parity_select == PARITY_NONE)
+                                if (parity_select == PARITY_NONE) begin
+                                    tx_stop_count <= 0;    // Stop bit counter starts.
                                     tx_state <= STOP;      // No parity, go to stop.
+                                end
                                 else
                                     tx_state <= PARITY;    // Send parity next.
                             end
@@ -221,6 +242,7 @@ module device(
 
                         if (tx_sample_count == 4'd15) begin
                             tx_sample_count <= 0;          // Done with parity bit.
+                            tx_stop_count <= 0;            // Stop bit counter starts.
                             tx_state <= STOP;              // Move to stop bit.
                         end
                         else begin
@@ -229,16 +251,17 @@ module device(
                     end
 
                     STOP: begin
-                        serial_tx <= 1'b1;                 // Drive stop bit high.
+                        serial_tx <= 1'b1;                 // Drive stop bit(s) high.
 
-                        if (tx_sample_count == 4'd15) begin
+                        if (tx_stop_count == tx_stop_total - 6'd1) begin
                             tx_sample_count <= 0;          // Stop bit finished.
+                            tx_stop_count <= 0;            // Clear stop bit counter.
                             tx_state <= IDLE;              // Return to idle.
                             tx_active <= 1'b0;             // TX no longer busy.
                             tx_done <= 1'b1;               // Pulse done.
                         end
                         else begin
-                            tx_sample_count <= tx_sample_count + 1'b1; // Keep stop bit high.
+                            tx_stop_count <= tx_stop_count + 6'd1; // Hold stop bit high.
                         end
                     end
 
@@ -247,6 +270,7 @@ module device(
                         tx_active <= 1'b0;                 // Clear busy flag.
                         serial_tx <= 1'b1;                 // Keep UART line idle.
                         tx_sample_count <= 0;              // Reset counter.
+                        tx_stop_count <= 0;                // Reset stop counter.
                     end
                 endcase
             end
@@ -425,6 +449,10 @@ module device(
                         end
                     end
 
+                    // Only the FIRST stop bit is sampled and checked here.
+                    // Extra stop bits (2nd of a 2-stop frame, the extra half
+                    // of a 1.5-stop frame) are ignored, per industry practice:
+                    // the receiver is free to look for the next start bit.
                     STOP: begin
                         if (rx_sample_count == 4'd15) begin
                             rx_sample_count <= 0;          // Stop bit time reached.
