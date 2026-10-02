@@ -88,10 +88,8 @@ vvp uart_sim
 gtkwave uart.vcd
 ```
 
-Expected end of log: `ALL TESTS PASSED`
-
 ## Notes
 
-- Top module is named `device`; testbench is `uart_tb`.
+- The design file is named `device.v`; testbench is `uart_tb_half_duplex.v`.
 - Only the first stop bit is checked on RX; extra stop bits are ignored.
 - Frames with a parity error are dropped, not stored.
