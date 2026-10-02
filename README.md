@@ -1,4 +1,4 @@
-# Configurable UART Protocol
+# Configurable UART Communication System
 
 ### A Feature-Rich UART RTL Design in Verilog
 
@@ -19,25 +19,22 @@
 
 This project implements a **configurable UART (Universal Asynchronous Receiver/Transmitter) communication system using Verilog HDL**.
 
-The design was developed incrementally, beginning with basic UART communication and progressively introducing features such as programmable baud rate, configurable data length, parity, oversampling, FIFO buffering, loopback, hardware flow control, and configurable stop bits.
+The design was developed incrementally, starting from basic UART communication and progressively introducing features required for a flexible and reliable serial communication interface.
 
-The project focuses on **RTL design, digital communication, parameterization, and verification**.
+The final design explores configurable baud rate, data length, parity, stop bits, receiver oversampling, FIFO buffering, loopback operation, hardware flow control, and error detection.
 
 ---
 
 # UART Frame Format
 
-UART is an asynchronous serial communication protocol in which data is transmitted **one bit at a time**.
+UART transmits data **serially, one bit at a time**, without a shared clock between the communicating devices.
 
 A typical UART frame is structured as:
 
 ```text
-       IDLE
-        │
-        ▼
-┌───────┬──────────────┬────────┬────────────┐
-│ START │  DATA BITS   │ PARITY │  STOP BIT  │
-│  0    │  5–8 bits    │  0/1   │     1      │
-└───────┴──────────────┴────────┴────────────┘
-        │
-        └──────────────► Transmitted serially
+  IDLE        START        DATA BITS        PARITY        STOP        IDLE
+   1            0        D0 D1 ... D7        P             1           1
+   │            │              │             │             │
+   └────────────┴──────────────┴─────────────┴─────────────┴────────────►
+
+                    One complete UART frame
