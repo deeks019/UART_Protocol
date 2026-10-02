@@ -1,4 +1,4 @@
-# Configurable UART Communication System
+# Configurable UART Protocol
 
 ### A Feature-Rich UART RTL Design in Verilog
 
@@ -19,47 +19,25 @@
 
 This project implements a **configurable UART (Universal Asynchronous Receiver/Transmitter) communication system using Verilog HDL**.
 
-The design was developed incrementally, starting from basic UART communication and progressively introducing features required in a more practical digital communication interface.
+The design was developed incrementally, beginning with basic UART communication and progressively introducing features such as programmable baud rate, configurable data length, parity, oversampling, FIFO buffering, loopback, hardware flow control, and configurable stop bits.
 
-The final design explores:
-
-- Configurable baud rate
-- Configurable data length
-- Configurable stop bits
-- Parity generation and checking
-- 16× receiver oversampling
-- Loopback operation
-- 16-byte TX/RX FIFO buffering
-- RTS/CTS hardware flow control
-- Error detection and status flags
-- Full-duplex and half-duplex communication
-
-The project also includes dedicated simulation and verification stages for each major feature.
+The project focuses on **RTL design, digital communication, parameterization, and verification**.
 
 ---
 
-# System Overview
+# UART Frame Format
+
+UART is an asynchronous serial communication protocol in which data is transmitted **one bit at a time**.
+
+A typical UART frame is structured as:
 
 ```text
-                         ┌──────────────────────────┐
-                         │      UART DEVICE         │
-                         │                          │
-                         │  ┌────────────────────┐  │
-TX DATA ────────────────►│  │    TX FIFO         │  │
-                         │  └─────────┬──────────┘  │
-                         │            │             │
-                         │       ┌────▼────┐        │
-                         │       │ UART TX │────────────► TX
-                         │       └─────────┘        │
-                         │                          │
-                         │       ┌─────────┐        │
-RX DATA ◄────────────────│───────│ UART RX │        │
-                         │       └────┬────┘        │
-                         │            │             │
-                         │  ┌─────────▼──────────┐  │
-                         │  │     RX FIFO        │  │
-                         │  └────────────────────┘  │
-                         │                          │
-                         │      RTS / CTS           │
-                         │      Flow Control        │
-                         └──────────────────────────┘
+       IDLE
+        │
+        ▼
+┌───────┬──────────────┬────────┬────────────┐
+│ START │  DATA BITS   │ PARITY │  STOP BIT  │
+│  0    │  5–8 bits    │  0/1   │     1      │
+└───────┴──────────────┴────────┴────────────┘
+        │
+        └──────────────► Transmitted serially
