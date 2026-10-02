@@ -1,96 +1,97 @@
-# 🛰️ UART — Full-Featured Serial Communication Core (Verilog)
+# UART in Verilog
 
-> A configurable UART transceiver with FIFO buffering, programmable framing, parity checking, and RTS/CTS hardware flow control — verified with a self-checking testbench.
+A configurable full-duplex UART with 16x oversampling, FIFOs, parity, and RTS/CTS flow control.
 
----
-
-## 🖼️ UART Frame Anatomy
+## Frame Format
 
 ```
- IDLE │ START │        DATA BITS (LSB first)        │ PARITY │ STOP(1/1.5/2) │ IDLE
- ───┐ ┌───────┬─────┬─────┬─────┬─────┬─────────────┬────────┬───────────────┐ ┌───
-    └─┘  0    │ D0  │ D1  │ D2  │ ...│  D(n-1)     │   P    │       1       └─┘
-              ◄─────────── 5 / 6 / 7 / 8 bits ─────►optional
-              sampled @ bit center (16× oversampling)
+      idle   START   DATA (LSB first)        PARITY    STOP
+      ────┐   ┌───┬───┬───┬─────┬───┬───┐  ┌─────┐  ┌──────────
+          │   │   │   │   │ ... │   │   │  │     │  │
+ line     └───┘ 0 │D0 │D1 │D2   │Dn │   │  │ P   │  │ 1 / 1.5 / 2
+                  └───┴───┴─────┴───┘   └──┘     └──┘
+                   5 – 8 bits           optional   bit-times
 ```
 
----
+| Field  | Size                     | Purpose                                  |
+|--------|--------------------------|------------------------------------------|
+| Start  | 1 bit (low)              | Wakes the receiver and syncs timing      |
+| Data   | 5 / 6 / 7 / 8 bits       | Payload, sent LSB first                  |
+| Parity | none / even / odd        | Single-bit error detection               |
+| Stop   | 1 / 1.5 / 2 bits (high)  | Marks frame end and returns line to idle |
 
-## ✨ Features — One Line Each
+## Features
 
-| # | Feature | What it does |
-|---|---------|--------------|
-| 1 | **16× Oversampling** | Samples each bit 16 times and decides at the bit center for noise-robust reception. |
-| 2 | **Programmable Baud** | 4 selectable baud rates (÷2, ÷4, ÷8, ÷16 tick divider) via `baud_select`. |
-| 3 | **Variable Data Length** | Sends/receives 5, 6, 7, or 8 data bits per frame. |
-| 4 | **Parity Control** | None / Even / Odd parity generation on TX and verification on RX. |
-| 5 | **Flexible Stop Bits** | 1, 1.5 (5-bit frames only, 16550-style), or 2 stop bits. |
-| 6 | **16-Byte TX FIFO** | Queue up to 16 bytes; the transmitter drains it automatically. |
-| 7 | **16-Byte RX FIFO** | Buffers incoming bytes until the host reads them with `rx_read`. |
-| 8 | **RTS/CTS Flow Control** | RTS goes high near-full (15/16) to pause the sender; TX only runs when CTS is low. |
-| 9 | **Parity Error Flag** | `parity_error` raises and the bad frame is dropped when parity fails. |
-| 10 | **Framing Error Flag** | `framing_error` raises when the stop bit is sampled low. |
-| 11 | **Overrun Error Flag** | `overrun_error` raises when a byte arrives with a full RX FIFO. |
-| 12 | **Status Outputs** | `tx_active`, `tx_done` pulse, and `rx_valid` give clean handshake signals. |
-| 13 | **Standard Frame Order** | Start → Data (LSB first) → optional Parity → Stop, line idles high. |
+- **Full duplex** – independent TX and RX state machines run simultaneously.
+- **16x oversampling** – the receiver samples at mid-bit for noise-tolerant reads.
+- **4 baud settings** – `baud_select` picks the sample-tick divider (2, 4, 8, 16).
+- **Variable data length** – 5 to 8 bits via `data_length`.
+- **Parity** – none, even, or odd, generated on TX and checked on RX.
+- **Stop bits** – 1, 1.5 (5-bit frames only, otherwise acts as 2), or 2.
+- **16-byte FIFOs** – separate TX and RX buffers with full/empty tracking.
+- **RTS/CTS flow control** – active-low; `rts` deasserts when RX FIFO is nearly full, `cts` pauses TX.
+- **Error flags** – parity, framing (bad stop bit), and overrun (RX FIFO full).
+- **False-start rejection** – glitches shorter than half a bit are ignored.
 
----
+## Configuration
 
-## 🔌 Ports at a Glance
+| Signal          | Values                                       |
+|-----------------|----------------------------------------------|
+| `baud_select`   | `00` ÷2 · `01` ÷4 · `10` ÷8 · `11` ÷16       |
+| `data_length`   | `00` 5b · `01` 6b · `10` 7b · `11` 8b        |
+| `parity_select` | `00` none · `01` even · `10` odd             |
+| `stop_bits`     | `00` 1 · `01` 1.5 · `10` 2                   |
 
-| Signal | Dir | Description |
-|--------|-----|-------------|
-| `clk`, `reset` | in | Clock and synchronous-active-high reset. |
-| `baud_select[1:0]` | in | Picks the 16× tick rate (4 speeds). |
-| `data_length[1:0]` | in | 00=5, 01=6, 10=7, 11=8 data bits. |
-| `parity_select[1:0]` | in | 00=none, 01=even, 10=odd. |
-| `stop_bits[1:0]` | in | 00=1, 01=1.5, 10=2 stop bits. |
-| `tx_start`, `tx_data` | in | Push one byte into the TX FIFO. |
-| `cts` | in | Clear-to-send, active-low (0 = may transmit). |
-| `rts` | out | Ready-to-receive, active-low (1 = stop sending). |
-| `serial_tx` / `serial_rx` | out/in | UART serial lines (idle high). |
-| `rx_data`, `rx_valid`, `rx_read` | out/in | Front FIFO byte, data-available flag, pop strobe. |
-| `parity/framing/overrun_error` | out | Sticky receiver error flags. |
+Baud rate = `clk / (divider × 16)`
 
----
+## Ports
 
-## ⚙️ How It Works
+| Port | Dir | Description |
+|------|-----|-------------|
+| `clk`, `reset` | in | Clock and async active-high reset |
+| `tx_start`, `tx_data[7:0]` | in | Push a byte into the TX FIFO |
+| `tx_active`, `tx_done` | out | TX busy flag and end-of-frame pulse |
+| `serial_tx` / `serial_rx` | out / in | Serial lines |
+| `rx_read` | in | Pop the front byte of the RX FIFO |
+| `rx_data[7:0]`, `rx_valid` | out | Front RX byte and data-available flag |
+| `cts` / `rts` | in / out | Flow control, active-low |
+| `parity_error`, `framing_error`, `overrun_error` | out | Sticky error flags, cleared on reset |
 
-- **Baud Generator** — divides `clk` into a `sample_tick` at 16× the bit rate.
-- **Transmitter FSM** — `IDLE → START → DATA → PARITY → STOP`, shifting bits LSB-first.
-- **Receiver FSM** — detects the falling edge, verifies the start bit at sample 7, then samples data at sample 15 of every bit.
-- **RX policy** — only the *first* stop bit is checked (extra stop bits are ignored), matching industry practice.
+## Architecture
 
----
+```
+ tx_data ─► TX FIFO ─► TX FSM ─► serial_tx
+                         ▲
+ baud_select ─► Baud Gen ─► 16x tick ─┐
+                                      ▼
+ rx_data ◄─ RX FIFO ◄─ RX FSM ◄─ serial_rx
 
-## 🧪 Testbench — 4 Self-Checking Scenarios
+ FSM states:  IDLE → START → DATA → PARITY → STOP
+```
 
-| Test | Purpose |
-|------|---------|
-| **TEST 1** | Normal 16× oversampled loopback of `0xA5` between two UARTs. |
-| **TEST 2** | Even and odd parity bit correctness checked live on the wire. |
-| **TEST 3** | Forced sampling fault (`force rx_sample_count = 11`) to expose misreads. |
-| **TEST 4** | RTS/CTS flow control: FIFO fills → RTS high → TX pauses → read → TX resumes. |
+## Testbench
 
-Run it:
+Two `device` instances are wired back-to-back (TX↔RX) in `uart_tb`.
+
+| # | Test | Checks |
+|---|------|--------|
+| 1 | Normal loopback | Byte sent = byte received at 16x oversampling |
+| 2 | Parity | Even and odd parity bit values on the line |
+| 3 | Bad oversampling | Forced early sample counter corrupts data (inspect in GTKWave) |
+| 4 | RTS/CTS | RTS rises at FIFO limit, TX pauses, resumes after a read |
+
+## Run
 
 ```bash
-iverilog -o uart uart.v uart_tb.v && vvp uart
-# then view waveforms:
+iverilog -o uart_sim uart.v
+vvp uart_sim
 gtkwave uart.vcd
 ```
 
-Expected output ends with: **`ALL TESTS PASSED`** ✅
+Expected end of log: `ALL TESTS PASSED`
 
----
+## Notes
 
-## 📁 Files
-
-```
-├── uart.v      →  the UART device (TX + RX + FIFOs + flow control)
-└── uart_tb.v   →  self-checking testbench with VCD waveform dump
-```
-
----
-
-<p align="center">Built with ❤️ in Verilog — start bit low, standards high.</p>
+- Top module is named `device`; testbench is `uart_tb`.
+- Only the first stop bit is checked on RX; extra stop bits are ignored.
+- Frames with a parity error are dropped, not stored.
